@@ -5,7 +5,7 @@ import { ToolDispatcher } from './tool_dispatcher.js';
 
 const DEFAULT_MODEL = 'gemini-3.7-flash';
 const DEFAULT_MODEL_ATTEMPT_TIMEOUT_MS = 20_000;
-const ALLOWED_THINKING_LEVELS = new Set(['low', 'medium', 'high']);
+const ALLOWED_THINKING_LEVELS = new Set(['none', 'low', 'medium', 'high']); // "none" added - v1.1
 const ROTATE_WORTHY_MODEL_STATUSES = new Set([401, 403, 429, 503]);
 
 const YT_ID_RE = /(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
@@ -367,22 +367,34 @@ export class AIEngine {
 
     /**
      * Executes generation call via the Google GenAI SDK.
+     * overrideModel = null, overrideThinkingLevel = null added - v1.1
      */
-    async #executeModelCall({ contents, systemInstruction, safetySettings, tools, keyIndex }) {
+    async #executeModelCall({ contents, systemInstruction, safetySettings, tools, keyIndex, overrideModel = null, overrideThinkingLevel = null }) { 
+        const activeThinkingLevel = overrideThinkingLevel !== null ? overrideThinkingLevel : this.thinkingLevel; // v1.1
         const config = {
             maxOutputTokens: 8192,
+            /* removed original - made this part conditional - v1.1
             thinkingConfig: {
                 thinkingLevel: this.thinkingLevel,
                 includeThoughts: true
             },
+            */
             tools,
             systemInstruction,
             safetySettings,
             httpOptions: {
                 timeout: this.modelAttemptTimeoutMs,
                 retryOptions: { attempts: 1 }
-            }
+            }   
         };
+        
+        // Only attach thinkingConfig if thinking is enabled and not 'none' - v1.1
+          if (activeThinkingLevel && activeThinkingLevel !== 'none') {
+              config.thinkingConfig = {
+                  thinkingLevel: activeThinkingLevel,
+                  includeThoughts: true
+              };
+          }
 
         if (this.verbose) {
             this.#logVerboseRequest({ contents, config });
@@ -392,7 +404,7 @@ export class AIEngine {
         let result;
         try {
             result = await client.models.generateContent({
-                model: this.modelName,
+                model: overrideModel || this.modelName, // overrideModel possibility added - v1.1
                 contents,
                 config
             });
@@ -437,7 +449,9 @@ export class AIEngine {
         safetySettings,
         tools,
         generationState,
-        disableGoogleGrounding
+        disableGoogleGrounding,
+        overrideModel = null, //added - v1.1
+        overrideThinkingLevel = null //added - v1.1
     }) {
         const startingKeyIndex = this.currentKeyIndex;
         const failures = [];
@@ -457,7 +471,9 @@ export class AIEngine {
                         systemInstruction: attemptSystemInstruction,
                         safetySettings,
                         tools: attemptTools,
-                        keyIndex
+                        keyIndex,
+                        overrideModel,          // v1.1
+                        overrideThinkingLevel   // v1.1
                     });
                     if (this.verbose) {
                         console.log(
@@ -676,9 +692,23 @@ export class AIEngine {
         recordMemory,
         started
     }) {
+        // v1.1 block ---
+        // 1. Check if the prompt is an Event Alert (e.g., subs, follows, raids)
+        const isEventAlert = typeof prompt === 'string' && prompt.startsWith('[Event Alert:');
+
+        // 2. Select dynamic model and thinking level
+        const activeModel = isEventAlert ? 'gemini-2.5-flash' : this.modelName;
+        const activeThinkingLevel = isEventAlert ? 'none' : this.thinkingLevel;
+        // --- v1.1 block end
+        
         this.#logHeader('GEMINI REQUEST');
+        // v1.1 log
+        console.log(`   ${COLORS.dim}Model:${COLORS.reset} ${activeModel} ${COLORS.dim}│ Grounding:${COLORS.reset} ${isEventAlert ? 'off' : this.searchGrounding} ${COLORS.dim}│ Thinking:${COLORS.reset} ${activeThinkingLevel}`);
+        console.log(`   ${COLORS.dim}Input:${COLORS.reset} ${prompt}`);
+        /* OLD LOG
         console.log(`   ${COLORS.dim}Model:${COLORS.reset} ${this.modelName} ${COLORS.dim}│ Grounding:${COLORS.reset} ${this.searchGrounding} ${COLORS.dim}│ Thinking:${COLORS.reset} ${this.thinkingLevel}`);
         console.log(`   ${COLORS.dim}Input:${COLORS.reset} ${prompt}`);
+        */
 
         if (channelContext || recentLogs?.length) {
             this.#logSubsection('Twitch Context');
@@ -701,7 +731,15 @@ export class AIEngine {
             imageUrl,
             operationalFacts
         } = await this.#buildUserParts(prompt, { disableMultimedia });
+        
+        // 3. Strip tools completely for Event Alerts to minimize latency & tool invocation risk - v1.1
+        const tools = isEventAlert 
+            ? [] 
+            : this.#selectTools({ allUrls, imageUrl, disableMultimedia, disableTools, caller, channelContext });
+
+        /* old replaced
         const tools = this.#selectTools({ allUrls, imageUrl, disableMultimedia, disableTools, caller, channelContext });
+        */
 
         const systemInstruction = this.#compileSystemInstruction({
             channelContext,
@@ -765,7 +803,9 @@ export class AIEngine {
                         safetySettings,
                         tools: turnTools,
                         generationState,
-                        disableGoogleGrounding
+                        disableGoogleGrounding,
+                        overrideModel: activeModel,                   // v1.1
+                        overrideThinkingLevel: activeThinkingLevel     //v1.1
                     });
                     this.#logTurnParts(turnResult);
                     return turnResult;
