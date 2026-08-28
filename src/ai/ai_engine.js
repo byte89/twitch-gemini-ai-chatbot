@@ -980,8 +980,22 @@ export class AIEngine {
         this.#logFooter();
 
         if (recordMemory) {
+            // Formats memory to keep expected format for non-thinking procedures, so it doesn't time out when switching back between modes - v1.1
+            if (isEventAlert) {
+                // Combine prompt and response into a single user-role turn so no "model thinking" signature is expected
+                history.push({
+                    role: 'user',
+                    parts: [{ text: `[System Log: ${prompt} | Bot Replied: "${agentResponse}"]` }]
+                });
+            } else {
+                // Standard chat turn
+                history.push({ role: 'user', parts: memoryUserParts });
+                history.push({ role: 'model', parts: latestSuccessfulParts });
+            }
+            /* v1.0
             history.push({ role: 'user', parts: memoryUserParts });
             history.push({ role: 'model', parts: latestSuccessfulParts });
+            */
         }
 
         return agentResponse;
