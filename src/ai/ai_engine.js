@@ -697,7 +697,7 @@ export class AIEngine {
         const isEventAlert = typeof prompt === 'string' && prompt.startsWith('[Event Alert:');
 
         // 2. Select dynamic model and thinking level
-        const activeModel = isEventAlert ? 'gemini-2.5-flash' : this.modelName;
+        const activeModel = isEventAlert ? 'gemini-3.1-flash-lite' : this.modelName;
         const activeThinkingLevel = isEventAlert ? 'none' : this.thinkingLevel;
         // --- v1.1 block end
         
